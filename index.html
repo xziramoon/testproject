@@ -165,16 +165,39 @@
             });
         }
 
+        // 🟢 ระบบดึงข้อมูลและทำความสะอาด (Data Sanitization) - อัปเดตให้รองรับชื่อคอลัมน์หลายรูปแบบ
         Papa.parse(CLOUD_DB_URL, {
-            download: true, header: true, skipEmptyLines: true,
+            download: true, 
+            header: true, 
+            skipEmptyLines: true,
+            transformHeader: function(h) {
+                // ลบช่องว่างและอักขระซ่อนที่แฝงมากับไฟล์ CSV (สำคัญมาก)
+                return h.trim().replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/,"");
+            },
             complete: function(results) { 
-                masterDb = results.data.map(row => ({
-                    Barcode: row['บาร์โค้ด'] || row.barcode || row.Barcode || row['รหัสแท่ง'] || "",
-                    Name: row['รายละเอียด'] || row['ชื่อสินค้า'] || row.Name || row['รายการ'] || "",
-                    Unit: row['หน่วยนับ'] || row.Unit || row['หน่วย'] || "ชิ้น",
-                    posCode: row['รหัสสินค้า'] || row.Code || row.SKU || row['รหัส'] || row['บาร์โค้ด'] || row.Barcode || ""
-                }));
-                document.getElementById('loader-screen').style.opacity = '0'; setTimeout(() => document.getElementById('loader-screen').style.display = 'none', 500);
+                masterDb = results.data.map(row => {
+                    // ดึงบาร์โค้ด (ถ้าหาไม่เจอ ให้ดึงคอลัมน์แรก)
+                    let barcode = String(row['บาร์โค้ด'] || row['Barcode'] || row['barcode'] || row['รหัสแท่ง'] || row['รหัสสินค้า'] || row[Object.keys(row)[0]] || "").trim();
+                    
+                    // ดึงชื่อสินค้า (ถ้าหาไม่เจอ ให้ดึงคอลัมน์ที่ 2)
+                    let name = String(row['ชื่อสินค้า'] || row['รายละเอียด'] || row['ชื่อ'] || row['สินค้า'] || row['รายการ'] || row['Name'] || row['Description'] || row['Item'] || row[Object.keys(row)[1]] || "ไม่มีชื่อสินค้า").trim();
+                    
+                    let unit = String(row['หน่วยนับ'] || row['หน่วย'] || row['Unit'] || "ชิ้น").trim();
+                    let posCode = String(row['รหัสสินค้า'] || row['posCode'] || row['Code'] || row['SKU'] || row['รหัส'] || barcode).trim();
+
+                    return { 
+                        Barcode: barcode, 
+                        Name: name, 
+                        Unit: unit, 
+                        posCode: posCode,
+                        _search_bc: barcode.toLowerCase(),
+                        _search_pc: posCode.toLowerCase(),
+                        _search_name: name.toLowerCase()
+                    };
+                });
+
+                document.getElementById('loader-screen').style.opacity = '0'; 
+                setTimeout(() => document.getElementById('loader-screen').style.display = 'none', 500);
                 
                 document.getElementById('picker-name-display').innerText = pickerName || "คลิกเพื่อระบุชื่อ";
                 if(!currentBillId) createNewBill(true); else updateUI();
@@ -269,7 +292,6 @@
             });
         }
 
-        // 🟢 ระบบกล้องที่ปรับจูนเพื่อมือถือโดยเฉพาะ (รีดสเปคสุดๆ)
         function startCamera() {
             document.getElementById('camera-modal').classList.remove('hidden');
             
@@ -277,31 +299,21 @@
                 if (html5QrCode) { try { if(html5QrCode.isScanning) { html5QrCode.stop().then(() => html5QrCode.clear()); } else { html5QrCode.clear(); } } catch(e) {} }
                 html5QrCode = new Html5Qrcode("reader");
                 
-                // กำหนดประเภทบาร์โค้ดให้สแกนเฉพาะที่จำเป็น เพื่อให้ CPU ไม่ทำงานหนัก
-                const formatsToSupport = [
-                    Html5QrcodeSupportedFormats.EAN_13,
-                    Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.EAN_8,
-                    Html5QrcodeSupportedFormats.UPC_A
-                ];
+                const formatsToSupport = [ Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A ];
 
                 html5QrCode.start(
-                    // บังคับกล้องหลังเสมอ
                     { facingMode: "environment" }, 
                     { 
-                        fps: 5, // ล็อกเฟรมเรตที่ 5FPS เพื่อลดความร้อนแบต
-                        qrbox: { width: 250, height: 120 }, // บีบพื้นที่อ่านให้เล็กลง CPU จะได้คำนวณน้อยลง
-                        disableFlip: true,
-                        formatsToSupport: formatsToSupport
+                        fps: 5, qrbox: { width: 250, height: 120 }, disableFlip: true, formatsToSupport: formatsToSupport
                     }, 
                     (decodedText) => { 
                         const now = Date.now(); 
-                        if(now - lastScanTime < 1000) return; // ป้องกันการสแกนซ้ำรัวๆ
+                        if(now - lastScanTime < 1000) return; 
                         lastScanTime = now; 
                         if(navigator.vibrate) navigator.vibrate(50); 
                         processBarcode(decodedText); 
                     }, 
-                    (err) => { /* ปิด Error ซ่อนไว้เพื่อไม่ให้หน่วงเครื่อง */ }
+                    (err) => { /* Ignore errors to avoid console spam */ }
                 ).catch(err => { 
                     stopCamera(); 
                     Swal.fire('เปิดกล้องไม่ได้', 'กรุณาอนุญาตสิทธิ์การเข้าถึงกล้องให้เบราว์เซอร์\n\n' + err, 'error'); 
@@ -317,25 +329,48 @@
 
         document.getElementById('manual-input').addEventListener('keypress', function(e) { if (e.key === 'Enter') { searchItem(this.value.trim()); this.value = ''; }});
 
+        // 🟢 อัปเดตระบบค้นหาให้ฉลาดและยืดหยุ่นขึ้น
         function searchItem(query) {
-            query = query.toLowerCase(); let exactMatch = masterDb.find(i => i.Barcode && i.Barcode.toLowerCase() === query); if (exactMatch) { processScannedItem(exactMatch); return; }
-            let matches = masterDb.filter(i => (i.Barcode && i.Barcode.toLowerCase().includes(query)) || (i.Name && i.Name.toLowerCase().includes(query)));
-            if (matches.length === 0) { playSound('error'); Swal.fire({ toast: true, position: 'top', icon: 'error', title: 'ไม่พบสินค้า', showConfirmButton: false, timer: 1500 }); } 
-            else if (matches.length === 1) { processScannedItem(matches[0]); } 
+            let cleanQuery = String(query).toLowerCase().trim();
+            if(!cleanQuery) return;
+
+            // ค้นหาแบบเป๊ะๆ (Exact Match)
+            let exactMatch = masterDb.find(i => i._search_bc === cleanQuery || i._search_pc === cleanQuery); 
+            if (exactMatch) { processScannedItem(exactMatch); return; }
+            
+            // ค้นหาแบบบางส่วน (Partial Match)
+            let matches = masterDb.filter(i => i._search_bc.includes(cleanQuery) || i._search_name.includes(cleanQuery) || i._search_pc.includes(cleanQuery));
+            
+            if (matches.length === 0) { 
+                playSound('error'); 
+                Swal.fire({ toast: true, position: 'top', icon: 'error', title: 'ไม่พบสินค้า', showConfirmButton: false, timer: 1500 }); 
+            } 
+            else if (matches.length === 1) { 
+                processScannedItem(matches[0]); 
+            } 
             else {
-                playSound('warning'); let html = '<div class="text-left font-sarabun max-h-[40vh] overflow-y-auto border border-gray-200 rounded-lg">';
-                matches.forEach((m, idx) => { html += `<div class="border-b p-3 hover:bg-orange-50 flex justify-between items-center transition cursor-pointer" onclick="Swal.close(); selectSearchResult(${idx})"><div><div class="font-bold text-sm text-gray-800">${m.Name}</div><div class="text-xs text-orange-600 font-mono mt-1">${m.Barcode}</div></div><div class="bg-gray-100 border border-gray-200 text-xs px-2 py-1 rounded font-bold">${m.Unit}</div></div>`; });
-                html += '</div>'; window.tempSearchResults = matches; Swal.fire({ title: 'พบหลายรายการ', html: html, showConfirmButton: false });
+                playSound('warning'); 
+                let html = '<div class="text-left font-sarabun max-h-[40vh] overflow-y-auto border border-gray-200 rounded-lg">';
+                matches.forEach((m, idx) => { 
+                    html += `<div class="border-b p-3 hover:bg-orange-50 flex justify-between items-center transition cursor-pointer" onclick="Swal.close(); selectSearchResult(${idx})"><div><div class="font-bold text-sm text-gray-800">${m.Name}</div><div class="text-xs text-orange-600 font-mono mt-1">${m.Barcode || m.posCode}</div></div><div class="bg-gray-100 border border-gray-200 text-xs px-2 py-1 rounded font-bold">${m.Unit}</div></div>`; 
+                });
+                html += '</div>'; 
+                window.tempSearchResults = matches; 
+                Swal.fire({ title: 'พบหลายรายการ', html: html, showConfirmButton: false });
             }
         }
 
         window.selectSearchResult = function(index) { if(window.tempSearchResults && window.tempSearchResults[index]) { processScannedItem(window.tempSearchResults[index]); window.tempSearchResults = null; } }
 
         function processBarcode(barcode) {
-            let itemDb = masterDb.find(m => String(m.Barcode).trim() === String(barcode).trim());
+            let cleanBarcode = String(barcode).toLowerCase().trim();
+            let itemDb = masterDb.find(m => m._search_bc === cleanBarcode || m._search_pc === cleanBarcode);
+            
             if (itemDb) { processScannedItem(itemDb, true); } else {
                 const isCam = !document.getElementById('camera-modal').classList.contains('hidden');
-                if(isCam) html5QrCode.pause(); playSound('error'); Swal.fire({ icon: 'error', title: 'ไม่พบในระบบ', text: `บาร์โค้ด: ${barcode}` }).then(() => { if(isCam) html5QrCode.resume(); });
+                if(isCam) html5QrCode.pause(); 
+                playSound('error'); 
+                Swal.fire({ icon: 'error', title: 'ไม่พบในระบบ', text: `บาร์โค้ด: ${barcode}` }).then(() => { if(isCam) html5QrCode.resume(); });
             }
         }
 
