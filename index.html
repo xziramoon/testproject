@@ -144,9 +144,7 @@
         let audioCtx = null; 
 
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
             if (audioCtx.state === 'suspended') { audioCtx.resume(); }
         }
         document.body.addEventListener('touchstart', initAudio, { once: true });
@@ -230,7 +228,6 @@
             updateUI();
         }
 
-        // 🟢 การควบคุมช่องค้นหาและการแสดงผลปุ่ม X
         const searchInput = document.getElementById('manual-input');
         const clearBtn = document.getElementById('clear-input-btn');
 
@@ -264,7 +261,6 @@
             if (matches.length === 0) { 
                 playSound('error'); 
                 Swal.fire({ toast: true, position: 'top', icon: 'error', title: 'ไม่พบสินค้า', showConfirmButton: false, timer: 1500 }); 
-                // คลุมดำคำที่พิมพ์ผิดเพื่อให้พนักงานแก้ไขได้ทันทีโดยไม่ต้องพิมพ์ใหม่
                 searchInput.focus();
                 searchInput.select();
             } 
@@ -279,7 +275,6 @@
                 });
                 html += '</div>'; 
                 window.tempSearchResults = matches; 
-                // เมื่อเลือกหรือปิดหน้าต่าง SweetAlert ข้อความเดิมจะโดนคลุมดำเพื่อพร้อมใช้งานต่อ
                 Swal.fire({ title: 'พบหลายรายการ', html: html, showConfirmButton: false }).then(() => {
                     searchInput.focus();
                     searchInput.select();
@@ -306,7 +301,59 @@
             }
         }
 
-        // 🟢 ฟังก์ชันหลักในการจัดของลงตะกร้า (อัปเกรดให้ Auto-Select ไม่ล้างคำทิ้ง)
+        // 🟢 ฟังก์ชัน Popup ระบุยอดกลับมาแล้ว!
+        function showQuantityPopup(dbItem, posCode, startVal, curUnit, existingIdx, isCam) {
+            let baseUnit = curUnit || dbItem.Unit || "ชิ้น";
+            let specificUnits = [...new Set(masterDb.filter(db => db.Name.trim().toLowerCase() === dbItem.Name.trim().toLowerCase() && db.Unit).map(db => db.Unit))];
+            if(specificUnits.length === 0) specificUnits = [baseUnit, ...globalUnits];
+
+            let unitHtml = '<div class="mt-4 mb-2 text-sm font-bold text-gray-500 text-left">เลือกหน่วยนับ:</div>';
+            unitHtml += '<div class="flex overflow-x-auto pb-2 gap-2 hide-scrollbar" style="-webkit-overflow-scrolling: touch; width: 100%;">';
+            
+            specificUnits.forEach(u => { 
+                let active = u === baseUnit ? "active" : ""; 
+                unitHtml += `<button class="swal-unit-btn ${active}" onclick="changeUnitTemp('${u}')">${u}</button>`; 
+            });
+            unitHtml += '</div>';
+            window.tempSelectedUnit = baseUnit;
+
+            Swal.fire({
+                title: 'ระบุยอดเบิก', 
+                html: `<div class="font-bold text-gray-800 text-[15px] mb-1 leading-snug">${dbItem.Name}</div>
+                       <div class="text-[10px] text-gray-500 mb-3">รหัส POS: ${posCode}</div>
+                       <input type="number" id="quick-qty" class="swal-custom-input" value="${startVal}" min="1">
+                       ${unitHtml}`,
+                showCancelButton: true, confirmButtonColor: '#F97316', confirmButtonText: 'บันทึกยอด', cancelButtonText: 'ยกเลิก',
+                didOpen: () => { const inp = document.getElementById('quick-qty'); inp.focus(); inp.select(); }
+            }).then(r => { 
+                if(r.isConfirmed) { 
+                    let finalVal = parseInt(document.getElementById('quick-qty').value) || 1;
+                    
+                    let finalBarcode = dbItem.Barcode; let finalPosCode = posCode;
+                    if(window.tempSelectedUnit !== dbItem.Unit) {
+                        let match = masterDb.find(db => db.Name.trim().toLowerCase() === dbItem.Name.trim().toLowerCase() && db.Unit === window.tempSelectedUnit);
+                        if(match) { finalBarcode = match.Barcode; finalPosCode = match.posCode || match.Barcode; }
+                    }
+
+                    if(existingIdx > -1) {
+                        currentItems[existingIdx].reqQty = finalVal; currentItems[existingIdx].unit = window.tempSelectedUnit;
+                        currentItems[existingIdx].barcode = finalBarcode; currentItems[existingIdx].posCode = finalPosCode;
+                    } else {
+                        currentItems.unshift({ barcode: finalBarcode, original_barcode: dbItem.Barcode, name: dbItem.Name, unit: window.tempSelectedUnit, reqQty: finalVal, posCode: finalPosCode });
+                    }
+                    saveLocalData(); 
+                    flashCard(existingIdx > -1 ? existingIdx : 0);
+                }
+                
+                // โฟกัสกลับมาและคลุมดำข้อความเดิม พิมพ์ต่อได้เลย
+                searchInput.focus();
+                searchInput.select();
+
+                if(isCam) html5QrCode.resume();
+            });
+        }
+
+        // 🟢 แก้ไขให้เรียก Popup เวลาสแกนเจอหรือกดเลือก
         function processScannedItem(dbItem, fromScanner = false) {
             const isCam = !document.getElementById('camera-modal').classList.contains('hidden'); 
             if(isCam) html5QrCode.pause(); 
@@ -315,26 +362,22 @@
             let existingIdx = currentItems.findIndex(i => i.posCode === posCode); 
             
             if (existingIdx > -1) {
-                playSound('success');
-                currentItems[existingIdx].reqQty += 1;
-                saveLocalData();
-                flashCard(existingIdx);
-            } else {
-                playSound('success'); 
-                currentItems.unshift({ 
-                    barcode: dbItem.Barcode, original_barcode: dbItem.Barcode, 
-                    name: dbItem.Name, unit: dbItem.Unit || "ชิ้น", 
-                    reqQty: 1, posCode: posCode 
+                playSound('warning');
+                Swal.fire({
+                    title: 'รายการซ้ำ!', html: `คุณสแกน <b>${dbItem.Name}</b> ไปแล้ว<br>ยอดเดิมในกล่องคือ: <b class="text-orange-600 text-lg">${currentItems[existingIdx].reqQty}</b> ${currentItems[existingIdx].unit}<br>ต้องการบวกเพิ่มใช่หรือไม่?`,
+                    icon: 'warning', showCancelButton: true, confirmButtonColor: '#F97316', confirmButtonText: 'ใช่, แก้ไขยอด', cancelButtonText: 'ยกเลิก'
+                }).then((r) => { 
+                    if(r.isConfirmed) { 
+                        showQuantityPopup(dbItem, posCode, currentItems[existingIdx].reqQty + 1, currentItems[existingIdx].unit, existingIdx, isCam); 
+                    } else { 
+                        if(isCam) html5QrCode.resume(); 
+                        searchInput.focus(); searchInput.select();
+                    } 
                 });
-                saveLocalData();
-                flashCard(0); 
+            } else { 
+                playSound('success'); 
+                showQuantityPopup(dbItem, posCode, 1, dbItem.Unit || "ชิ้น", -1, isCam); 
             }
-
-            // ⭐ ไฮไลท์อัปเกรด: โฟกัสกลับมาและคลุมดำข้อความเดิมทันที พิมพ์ต่อได้เลย ไม่ล้างทิ้งแล้ว!
-            searchInput.focus();
-            searchInput.select();
-            
-            if(isCam) setTimeout(() => html5QrCode.resume(), 600); 
         }
 
         function flashCard(idx) {
@@ -402,7 +445,6 @@
                 }
                 else if(r.isDenied) { currentItems.splice(idx, 1); saveLocalData(); }
                 
-                // ให้ช่องค้นหาหลักพร้อมทำงานต่อเนื่องเสมอ
                 searchInput.focus();
                 searchInput.select();
             });
