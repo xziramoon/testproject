@@ -91,7 +91,6 @@
                 <i class="fas fa-times-circle text-lg bg-white rounded-full"></i>
             </button>
         </div>
-        
         <div id="items-list"></div>
     </div>
 
@@ -202,16 +201,13 @@
                     let name = String(row['ชื่อสินค้า'] || row['รายละเอียด'] || row['ชื่อ'] || row['สินค้า'] || row['รายการ'] || row['Name'] || row['Description'] || row['Item'] || row[Object.keys(row)[1]] || "ไม่มีชื่อสินค้า").trim();
                     let unit = String(row['หน่วยนับ'] || row['หน่วย'] || row['Unit'] || "ชิ้น").trim();
                     let posCode = String(row['รหัสสินค้า'] || row['posCode'] || row['Code'] || row['SKU'] || row['รหัส'] || barcode).trim();
-
                     return { 
                         Barcode: barcode, Name: name, Unit: unit, posCode: posCode,
                         _search_bc: barcode.toLowerCase(), _search_pc: posCode.toLowerCase(), _search_name: name.toLowerCase()
                     };
                 });
-
                 document.getElementById('loader-screen').style.opacity = '0'; 
                 setTimeout(() => document.getElementById('loader-screen').style.display = 'none', 500);
-                
                 document.getElementById('picker-name-display').innerText = pickerName || "คลิกเพื่อระบุชื่อ";
                 if(!currentBillId) createNewBill(true); else updateUI();
                 connectMQTT();
@@ -231,10 +227,7 @@
         const searchInput = document.getElementById('manual-input');
         const clearBtn = document.getElementById('clear-input-btn');
 
-        searchInput.addEventListener('input', function() {
-            clearBtn.style.display = this.value.length > 0 ? 'block' : 'none';
-        });
-
+        searchInput.addEventListener('input', function() { clearBtn.style.display = this.value.length > 0 ? 'block' : 'none'; });
         searchInput.addEventListener('keydown', function(e) { 
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -244,9 +237,7 @@
         });
 
         window.clearSearchInput = function() {
-            searchInput.value = '';
-            clearBtn.style.display = 'none';
-            searchInput.focus(); 
+            searchInput.value = ''; clearBtn.style.display = 'none'; searchInput.focus(); 
         };
 
         function searchItem(query) {
@@ -261,8 +252,7 @@
             if (matches.length === 0) { 
                 playSound('error'); 
                 Swal.fire({ toast: true, position: 'top', icon: 'error', title: 'ไม่พบสินค้า', showConfirmButton: false, timer: 1500 }); 
-                searchInput.focus();
-                searchInput.select();
+                searchInput.focus(); searchInput.select();
             } 
             else if (matches.length === 1) { 
                 processScannedItem(matches[0]); 
@@ -271,28 +261,31 @@
                 playSound('warning'); 
                 let html = '<div class="text-left font-sarabun max-h-[40vh] overflow-y-auto border border-gray-200 rounded-lg">';
                 matches.forEach((m, idx) => { 
-                    html += `<div class="border-b p-3 hover:bg-orange-50 flex justify-between items-center transition cursor-pointer" onclick="Swal.close(); selectSearchResult(${idx})"><div><div class="font-bold text-sm text-gray-800">${m.Name}</div><div class="text-xs text-orange-600 font-mono mt-1">${m.Barcode || m.posCode}</div></div><div class="bg-gray-100 border border-gray-200 text-xs px-2 py-1 rounded font-bold">${m.Unit}</div></div>`; 
+                    // อัปเกรด: เอา Swal.close() ออกเพื่อป้องกัน Race Condition
+                    html += `<div class="border-b p-3 hover:bg-orange-50 flex justify-between items-center transition cursor-pointer" onclick="selectSearchResult(${idx})"><div><div class="font-bold text-sm text-gray-800">${m.Name}</div><div class="text-xs text-orange-600 font-mono mt-1">${m.Barcode || m.posCode}</div></div><div class="bg-gray-100 border border-gray-200 text-xs px-2 py-1 rounded font-bold">${m.Unit}</div></div>`; 
                 });
                 html += '</div>'; 
                 window.tempSearchResults = matches; 
-                Swal.fire({ title: 'พบหลายรายการ', html: html, showConfirmButton: false }).then(() => {
-                    searchInput.focus();
-                    searchInput.select();
+                Swal.fire({ title: 'พบหลายรายการ', html: html, showConfirmButton: false }).then((result) => {
+                    // ถ้ายกเลิกการค้นหา (กดข้างนอก) ให้ดึง Cursor กลับมา
+                    if (result.isDismissed) { setTimeout(() => { searchInput.focus(); searchInput.select(); }, 100); }
                 });
             }
         }
 
         window.selectSearchResult = function(index) { 
             if(window.tempSearchResults && window.tempSearchResults[index]) { 
-                processScannedItem(window.tempSearchResults[index]); 
+                let item = window.tempSearchResults[index];
                 window.tempSearchResults = null; 
+                Swal.close(); 
+                // หน่วงเวลาเล็กน้อยให้หน้าต่างเดิมปิดสนิท ก่อนเด้งหน้าต่างใหม่ (กันค้าง)
+                setTimeout(() => { processScannedItem(item); }, 250);
             } 
         }
 
         function processBarcode(barcode) {
             let cleanBarcode = String(barcode).toLowerCase().trim();
             let itemDb = masterDb.find(m => m._search_bc === cleanBarcode || m._search_pc === cleanBarcode);
-            
             if (itemDb) { processScannedItem(itemDb, true); } else {
                 const isCam = !document.getElementById('camera-modal').classList.contains('hidden');
                 if(isCam) html5QrCode.pause(); 
@@ -301,7 +294,7 @@
             }
         }
 
-        // 🟢 ฟังก์ชัน Popup ระบุยอดกลับมาแล้ว!
+        // 🟢 ฟังก์ชันหลักที่เด้งหน้าต่าง "ระบุยอด" กลับมาแล้ว
         function showQuantityPopup(dbItem, posCode, startVal, curUnit, existingIdx, isCam) {
             let baseUnit = curUnit || dbItem.Unit || "ชิ้น";
             let specificUnits = [...new Set(masterDb.filter(db => db.Name.trim().toLowerCase() === dbItem.Name.trim().toLowerCase() && db.Unit).map(db => db.Unit))];
@@ -309,7 +302,6 @@
 
             let unitHtml = '<div class="mt-4 mb-2 text-sm font-bold text-gray-500 text-left">เลือกหน่วยนับ:</div>';
             unitHtml += '<div class="flex overflow-x-auto pb-2 gap-2 hide-scrollbar" style="-webkit-overflow-scrolling: touch; width: 100%;">';
-            
             specificUnits.forEach(u => { 
                 let active = u === baseUnit ? "active" : ""; 
                 unitHtml += `<button class="swal-unit-btn ${active}" onclick="changeUnitTemp('${u}')">${u}</button>`; 
@@ -324,11 +316,12 @@
                        <input type="number" id="quick-qty" class="swal-custom-input" value="${startVal}" min="1">
                        ${unitHtml}`,
                 showCancelButton: true, confirmButtonColor: '#F97316', confirmButtonText: 'บันทึกยอด', cancelButtonText: 'ยกเลิก',
-                didOpen: () => { const inp = document.getElementById('quick-qty'); inp.focus(); inp.select(); }
+                didOpen: () => { 
+                    setTimeout(() => { const inp = document.getElementById('quick-qty'); if(inp){ inp.focus(); inp.select(); } }, 100); 
+                }
             }).then(r => { 
                 if(r.isConfirmed) { 
                     let finalVal = parseInt(document.getElementById('quick-qty').value) || 1;
-                    
                     let finalBarcode = dbItem.Barcode; let finalPosCode = posCode;
                     if(window.tempSelectedUnit !== dbItem.Unit) {
                         let match = masterDb.find(db => db.Name.trim().toLowerCase() === dbItem.Name.trim().toLowerCase() && db.Unit === window.tempSelectedUnit);
@@ -345,15 +338,11 @@
                     flashCard(existingIdx > -1 ? existingIdx : 0);
                 }
                 
-                // โฟกัสกลับมาและคลุมดำข้อความเดิม พิมพ์ต่อได้เลย
-                searchInput.focus();
-                searchInput.select();
-
+                setTimeout(() => { searchInput.focus(); searchInput.select(); }, 150);
                 if(isCam) html5QrCode.resume();
             });
         }
 
-        // 🟢 แก้ไขให้เรียก Popup เวลาสแกนเจอหรือกดเลือก
         function processScannedItem(dbItem, fromScanner = false) {
             const isCam = !document.getElementById('camera-modal').classList.contains('hidden'); 
             if(isCam) html5QrCode.pause(); 
@@ -368,10 +357,10 @@
                     icon: 'warning', showCancelButton: true, confirmButtonColor: '#F97316', confirmButtonText: 'ใช่, แก้ไขยอด', cancelButtonText: 'ยกเลิก'
                 }).then((r) => { 
                     if(r.isConfirmed) { 
-                        showQuantityPopup(dbItem, posCode, currentItems[existingIdx].reqQty + 1, currentItems[existingIdx].unit, existingIdx, isCam); 
+                        setTimeout(() => { showQuantityPopup(dbItem, posCode, currentItems[existingIdx].reqQty + 1, currentItems[existingIdx].unit, existingIdx, isCam); }, 250);
                     } else { 
                         if(isCam) html5QrCode.resume(); 
-                        searchInput.focus(); searchInput.select();
+                        setTimeout(() => { searchInput.focus(); searchInput.select(); }, 100);
                     } 
                 });
             } else { 
@@ -381,35 +370,19 @@
         }
 
         function flashCard(idx) {
-            setTimeout(() => {
-                const card = document.getElementById(`scard-${idx}`);
-                if(card) {
-                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    card.classList.add('row-highlight');
-                    setTimeout(() => card.classList.remove('row-highlight'), 800);
-                }
-            }, 50);
+            setTimeout(() => { const card = document.getElementById(`scard-${idx}`); if(card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('row-highlight'); setTimeout(() => card.classList.remove('row-highlight'), 800); } }, 50);
         }
 
         window.updateQty = function(idx, delta, event) {
             if(event) event.stopPropagation(); 
             initAudio();
-            
             let newQty = currentItems[idx].reqQty + delta;
             if (newQty <= 0) {
                 Swal.fire({
                     title: 'ลบรายการ?', text: `ต้องการเอา ${currentItems[idx].name} ออกจากกล่อง?`, icon: 'warning',
                     showCancelButton: true, confirmButtonColor: '#EF4444', confirmButtonText: 'ลบทิ้ง', cancelButtonText: 'ยกเลิก'
-                }).then((r) => { 
-                    if (r.isConfirmed) { 
-                        currentItems.splice(idx, 1); saveLocalData(); playSound('error'); 
-                    } 
-                });
-            } else {
-                currentItems[idx].reqQty = newQty;
-                saveLocalData();
-                playSound('success');
-            }
+                }).then((r) => { if (r.isConfirmed) { currentItems.splice(idx, 1); saveLocalData(); playSound('error'); } });
+            } else { currentItems[idx].reqQty = newQty; saveLocalData(); playSound('success'); }
         }
 
         window.changeUnitTemp = function(newUnit) {
@@ -420,7 +393,6 @@
 
         window.editItem = function(idx) {
             let startVal = currentItems[idx].reqQty; let curUnit = currentItems[idx].unit;
-            
             let specificUnits = [...new Set(masterDb.filter(db => db.Name.trim().toLowerCase() === currentItems[idx].name.trim().toLowerCase() && db.Unit).map(db => db.Unit))];
             if(specificUnits.length === 0) specificUnits = [curUnit, ...globalUnits];
 
@@ -431,22 +403,17 @@
             Swal.fire({
                 title: 'แก้ไขรายการ', html: `<div class="font-bold text-gray-800 text-[15px] mb-3 leading-snug">${currentItems[idx].name}</div><input type="number" id="quick-qty" class="swal-custom-input" value="${startVal}" min="1">${unitHtml}`,
                 showCancelButton: true, showDenyButton: true, confirmButtonColor: '#F97316', denyButtonColor: '#EF4444', confirmButtonText: 'บันทึก', denyButtonText: 'ลบทิ้ง', cancelButtonText: 'ยกเลิก',
-                didOpen: () => { const inp = document.getElementById('quick-qty'); inp.focus(); inp.select(); }
+                didOpen: () => { setTimeout(() => { const inp = document.getElementById('quick-qty'); if(inp){ inp.focus(); inp.select(); } }, 100); }
             }).then(r => { 
                 if(r.isConfirmed) { 
                     currentItems[idx].reqQty = parseInt(document.getElementById('quick-qty').value) || 1; 
-                    
                     if(window.tempSelectedUnit !== currentItems[idx].unit) {
                         let match = masterDb.find(db => db.Name.trim().toLowerCase() === currentItems[idx].name.trim().toLowerCase() && db.Unit === window.tempSelectedUnit);
                         if(match) { currentItems[idx].barcode = match.Barcode; currentItems[idx].posCode = match.posCode || match.Barcode; }
                     }
-                    currentItems[idx].unit = window.tempSelectedUnit; 
-                    saveLocalData(); 
-                }
-                else if(r.isDenied) { currentItems.splice(idx, 1); saveLocalData(); }
-                
-                searchInput.focus();
-                searchInput.select();
+                    currentItems[idx].unit = window.tempSelectedUnit; saveLocalData(); 
+                } else if(r.isDenied) { currentItems.splice(idx, 1); saveLocalData(); }
+                setTimeout(() => { searchInput.focus(); searchInput.select(); }, 150);
             });
         }
 
@@ -459,10 +426,8 @@
             } else {
                 btnSubmit.disabled = true; btnSubmit.className = "flex-1 bg-gray-200 text-gray-400 font-bold py-3.5 rounded-xl ml-2 flex justify-center items-center text-[15px] transition-all"; btnSubmit.innerHTML = `สแกนสินค้าเพื่อเริ่ม`;
             }
-            
             const container = document.getElementById('items-list');
             if (currentItems.length === 0) { container.innerHTML = `<div class="text-center text-gray-400 mt-20"><i class="fas fa-box-open text-5xl mb-4 opacity-20"></i><p class="font-bold">ยังไม่มีสินค้าในกล่อง</p></div>`; return; }
-            
             let htmlContent = "";
             currentItems.forEach((i, idx) => {
                 htmlContent += `
@@ -474,7 +439,6 @@
                         </div>
                         <div class="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded cursor-pointer border border-gray-200" onclick="editItem(${idx})">${i.unit}</div>
                     </div>
-                    
                     <div class="flex justify-between items-center border-t border-gray-50 pt-2 mt-1">
                         <div class="text-xs text-orange-400 font-bold">จำนวน:</div>
                         <div class="flex items-center gap-1 bg-orange-50 rounded-lg p-1 border border-orange-100">
@@ -484,21 +448,18 @@
                         </div>
                     </div>
                 </div>`;
-            }); 
-            container.innerHTML = htmlContent;
+            }); container.innerHTML = htmlContent;
         }
 
         window.showManageMenu = function() {
             Swal.fire({
                 title: 'จัดการข้อมูลบิล',
-                html: `
-                    <div class="flex flex-col gap-3 mt-4">
+                html: `<div class="flex flex-col gap-3 mt-4">
                         <button onclick="Swal.close(); exportToFile()" class="w-full bg-blue-50 border border-blue-200 text-blue-700 py-3 rounded-lg font-bold shadow-sm flex items-center justify-center"><i class="fas fa-save mr-2 text-xl"></i> เซฟบิลลงเครื่อง (Backup)</button>
                         <button onclick="Swal.close(); document.getElementById('file-loader').click()" class="w-full bg-purple-50 border border-purple-200 text-purple-700 py-3 rounded-lg font-bold shadow-sm flex items-center justify-center"><i class="fas fa-folder-open mr-2 text-xl"></i> โหลดบิลจากไฟล์ (Restore)</button>
                         <hr class="my-2 border-gray-200">
                         <button onclick="Swal.close(); confirmNewBill()" class="w-full bg-red-50 border border-red-200 text-red-600 py-3 rounded-lg font-bold shadow-sm flex items-center justify-center"><i class="fas fa-trash-alt mr-2 text-xl"></i> ลบทิ้ง / เริ่มบิลใหม่</button>
-                    </div>
-                `,
+                    </div>`,
                 showConfirmButton: false, showCloseButton: true
             });
         }
@@ -528,20 +489,14 @@
             if(!silent) Swal.fire({toast:true, position:'top', icon:'success', title:'เปิดบิลใหม่แล้ว', showConfirmButton:false, timer:1000});
         }
         function confirmNewBill() {
-            if(currentItems.length > 0) {
-                Swal.fire({ title: 'ทิ้งบิลเดิม?', text: 'รายการจะหายไป ยืนยันสร้างใหม่หรือไม่?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#EF4444', confirmButtonText: 'ลบและสร้างใหม่' }).then((r) => { if(r.isConfirmed) createNewBill(); });
-            } else { createNewBill(); }
+            if(currentItems.length > 0) { Swal.fire({ title: 'ทิ้งบิลเดิม?', text: 'รายการจะหายไป ยืนยันสร้างใหม่หรือไม่?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#EF4444', confirmButtonText: 'ลบและสร้างใหม่' }).then((r) => { if(r.isConfirmed) createNewBill(); }); } else { createNewBill(); }
         }
         function connectMQTT() {
             document.getElementById('mqtt-status').innerHTML = '<i class="fas fa-spinner fa-spin mr-1 text-yellow-300"></i>กำลังต่อ...';
             if(client) client.end(); 
             const clientId = 'smobile_' + Math.random().toString(16).substr(2, 8);
             client = mqtt.connect(MQTT_BROKER, { clientId: clientId, keepalive: 60, reconnectPeriod: 5000 });
-            
-            client.on('connect', () => { 
-                document.getElementById('mqtt-status').innerHTML = '<i class="fas fa-circle mr-1 text-green-400"></i>ออนไลน์'; 
-                client.subscribe('wangwian-hub-ack');
-            });
+            client.on('connect', () => { document.getElementById('mqtt-status').innerHTML = '<i class="fas fa-circle mr-1 text-green-400"></i>ออนไลน์'; client.subscribe('wangwian-hub-ack'); });
             client.on('message', (topic, message) => {
                 if (topic === 'wangwian-hub-ack') {
                     try {
@@ -550,9 +505,7 @@
                             clearTimeout(ackTimeout); pendingMsgId = null; Swal.close();
                             senderHistory.unshift({ billId: currentBillId, picker: pickerName, timestamp: getThaiDateTime(), items: JSON.parse(JSON.stringify(currentItems)) });
                             if(senderHistory.length > 50) senderHistory.pop(); localStorage.setItem('sm_history_log', JSON.stringify(senderHistory));
-                            
-                            Swal.fire({ icon: 'success', title: 'ส่งสำเร็จ 100%!', text: 'คอมพิวเตอร์ยืนยันการรับข้อมูลแล้ว', timer: 2500, showConfirmButton: false });
-                            createNewBill(true); 
+                            Swal.fire({ icon: 'success', title: 'ส่งสำเร็จ 100%!', text: 'คอมพิวเตอร์ยืนยันการรับข้อมูลแล้ว', timer: 2500, showConfirmButton: false }); createNewBill(true); 
                         }
                     } catch(e) {}
                 }
@@ -564,25 +517,13 @@
                 if (html5QrCode) { try { if(html5QrCode.isScanning) { html5QrCode.stop().then(() => html5QrCode.clear()); } else { html5QrCode.clear(); } } catch(e) {} }
                 html5QrCode = new Html5Qrcode("reader");
                 const formatsToSupport = [ Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A ];
-                html5QrCode.start(
-                    { facingMode: "environment" }, 
-                    { fps: 5, qrbox: { width: 250, height: 120 }, disableFlip: true, formatsToSupport: formatsToSupport }, 
-                    (decodedText) => { 
-                        const now = Date.now(); 
-                        if(now - lastScanTime < 1000) return; 
-                        lastScanTime = now; 
-                        if(navigator.vibrate) navigator.vibrate(50); 
-                        processBarcode(decodedText); 
-                    }, 
-                    (err) => { }
-                ).catch(err => { 
-                    stopCamera(); Swal.fire('เปิดกล้องไม่ได้', 'กรุณาอนุญาตสิทธิ์การเข้าถึงกล้องให้เบราว์เซอร์\n\n' + err, 'error'); 
-                });
+                html5QrCode.start( { facingMode: "environment" }, { fps: 5, qrbox: { width: 250, height: 120 }, disableFlip: true, formatsToSupport: formatsToSupport }, 
+                    (decodedText) => { const now = Date.now(); if(now - lastScanTime < 1000) return; lastScanTime = now; if(navigator.vibrate) navigator.vibrate(50); processBarcode(decodedText); }, (err) => { }
+                ).catch(err => { stopCamera(); Swal.fire('เปิดกล้องไม่ได้', 'กรุณาอนุญาตสิทธิ์การเข้าถึงกล้องให้เบราว์เซอร์\n\n' + err, 'error'); });
             }, 200); 
         }
         function stopCamera() {
-            if (html5QrCode && html5QrCode.isScanning) { 
-                html5QrCode.stop().then(() => { html5QrCode.clear(); document.getElementById('camera-modal').classList.add('hidden'); }).catch(e => { document.getElementById('camera-modal').classList.add('hidden'); }); 
+            if (html5QrCode && html5QrCode.isScanning) { html5QrCode.stop().then(() => { html5QrCode.clear(); document.getElementById('camera-modal').classList.add('hidden'); }).catch(e => { document.getElementById('camera-modal').classList.add('hidden'); }); 
             } else { document.getElementById('camera-modal').classList.add('hidden'); }
         }
         window.submitBillToHub = function() {
@@ -598,12 +539,8 @@
                     pendingMsgId = 'MSG-' + Date.now();
                     const payload = { msgId: pendingMsgId, billId: currentBillId, picker: pickerName, items: currentItems };
                     client.publish("wangwian-mobile-to-hub", JSON.stringify(payload), { qos: 1 });
-                    
                     Swal.fire({ title: 'กำลังส่งข้อมูล...', html: 'โปรดรอคอมพิวเตอร์ยืนยันการรับข้อมูล<br><br><i class="fas fa-spinner fa-spin text-3xl text-orange-500"></i>', allowOutsideClick: false, showConfirmButton: false });
-                    ackTimeout = setTimeout(() => {
-                        pendingMsgId = null;
-                        Swal.fire({ icon: 'error', title: 'ส่งไม่สำเร็จ!', text: 'คอมพิวเตอร์หน้าจอวงเวียนไม่ตอบสนอง กรุณาตรวจสอบว่าคอมพิวเตอร์เปิดแอปและต่อเน็ตอยู่หรือไม่ (ข้อมูลในมือถือยังอยู่ครบ)', confirmButtonColor: '#EF4444' });
-                    }, 7000);
+                    ackTimeout = setTimeout(() => { pendingMsgId = null; Swal.fire({ icon: 'error', title: 'ส่งไม่สำเร็จ!', text: 'คอมพิวเตอร์หน้าจอวงเวียนไม่ตอบสนอง กรุณาตรวจสอบว่าคอมพิวเตอร์เปิดแอปและต่อเน็ตอยู่หรือไม่ (ข้อมูลในมือถือยังอยู่ครบ)', confirmButtonColor: '#EF4444' }); }, 7000);
                 }
             });
         }
@@ -614,9 +551,7 @@
                 if(log.picker) { pickerName = log.picker; localStorage.setItem('sm_picker_name', pickerName); document.getElementById('picker-name-display').innerText = pickerName; }
                 saveLocalData(); Swal.fire({toast:true, position:'top', icon:'success', title:'ดึงประวัติสำเร็จ!', showConfirmButton:false, timer:1500});
             };
-            if(currentItems.length > 0) {
-                Swal.fire({ title: 'มีรายการค้างอยู่บนจอ', text: 'ต้องการทิ้งรายการปัจจุบันเพื่อเปิดดูบิลประวัติหรือไม่?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#F97316', confirmButtonText: 'ทิ้งและเปิดดู', cancelButtonText: 'ยกเลิก' }).then((r) => { if(r.isConfirmed) loadData(); });
-            } else { loadData(); }
+            if(currentItems.length > 0) { Swal.fire({ title: 'มีรายการค้างอยู่บนจอ', text: 'ต้องการทิ้งรายการปัจจุบันเพื่อเปิดดูบิลประวัติหรือไม่?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#F97316', confirmButtonText: 'ทิ้งและเปิดดู', cancelButtonText: 'ยกเลิก' }).then((r) => { if(r.isConfirmed) loadData(); }); } else { loadData(); }
         }
         window.showHistory = function() {
             if(senderHistory.length === 0) return Swal.fire({toast:true, position:'top', icon:'info', title:'ไม่มีประวัติ', showConfirmButton:false, timer:1500});
